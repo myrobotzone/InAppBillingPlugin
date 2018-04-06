@@ -54,6 +54,11 @@ namespace Plugin.InAppBilling.Abstractions
         /// </summary>
         public string Payload { get; set; }
 
+		/// <summary>
+		/// Gets or sets the date at which this purchase will expire. This is usually only relevant for subscriptions.
+		/// </summary>
+	    public DateTimeOffset ExpirationDate { get; set; }
+
         /// <summary>
         /// Prints out product
         /// </summary>

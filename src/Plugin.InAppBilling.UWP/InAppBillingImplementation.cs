@@ -77,16 +77,17 @@ namespace Plugin.InAppBilling
 			var appLicense = await context.GetAppLicenseAsync();
 			var purchases = new List<InAppBillingPurchase>()
 			{
-				new InAppBillingPurchase()
+				new InAppBillingPurchase
 				{
 					ProductId = appLicense.SkuStoreId,
+					ExpirationDate = appLicense.ExpirationDate,
 					State = appLicense.IsActive ? PurchaseState.Purchased : PurchaseState.Unknown,
 				}
 			};
-			purchases.AddRange(appLicense.AddOnLicenses.Select(l => new InAppBillingPurchase()
+			purchases.AddRange(appLicense.AddOnLicenses.Select(l => new InAppBillingPurchase
 			{
-				AutoRenewing = false,
 				ProductId = l.Value.SkuStoreId,
+				ExpirationDate = appLicense.ExpirationDate,
 				State = l.Value.IsActive ? PurchaseState.Purchased : PurchaseState.Unknown
 			}));
 			return purchases;
