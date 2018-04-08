@@ -81,7 +81,7 @@ namespace Plugin.InAppBilling
         {
             if (serviceConnection?.Service == null)
             {
-                throw new InAppBillingPurchaseException(PurchaseError.BillingUnavailable, "You are not connected to the Google Play App store.");
+                throw new InAppBillingPurchaseException(PurchaseError.ServiceUnavailable, "You are not connected to the Google Play App store.");
             }
 
             IEnumerable<Product> products = null;
@@ -105,7 +105,9 @@ namespace Plugin.InAppBilling
                 CurrencyCode = product.CurrencyCode,
                 LocalizedPrice = product.Price,
                 ProductId = product.ProductId,
-                MicrosPrice = product.MicrosPrice
+                MicrosPrice = product.MicrosPrice,
+                LocalizedIntroductoryPrice = product.IntroductoryPrice,
+                MicrosIntroductoryPrice = product.IntroductoryPriceAmountMicros
             });
         }
 
@@ -151,7 +153,7 @@ namespace Plugin.InAppBilling
         {
             if (serviceConnection?.Service == null)
             {
-                throw new InAppBillingPurchaseException(PurchaseError.BillingUnavailable, "You are not connected to the Google Play App store.");
+                throw new InAppBillingPurchaseException(PurchaseError.ServiceUnavailable, "You are not connected to the Google Play App store.");
             }
 
             List<Purchase> purchases = null;
@@ -252,7 +254,7 @@ namespace Plugin.InAppBilling
 
             if (serviceConnection?.Service == null)
             {
-                throw new InAppBillingPurchaseException(PurchaseError.BillingUnavailable, "You are not connected to the Google Play App store.");
+                throw new InAppBillingPurchaseException(PurchaseError.ServiceUnavailable, "You are not connected to the Google Play App store.");
             }
 
             Purchase purchase = null;
@@ -286,50 +288,51 @@ namespace Plugin.InAppBilling
 
         async Task<Purchase> PurchaseAsync(string productSku, string itemType, string payload, IInAppBillingVerifyPurchase verifyPurchase)
         {
-
-            if (tcsPurchase != null && !tcsPurchase.Task.IsCompleted)
-                return null;
-
-            tcsPurchase = new TaskCompletionSource<PurchaseResponse>();
-
-            Bundle buyIntentBundle = serviceConnection.Service.GetBuyIntent(3, Context.PackageName, productSku, itemType, payload);
-            var response = GetResponseCodeFromBundle(buyIntentBundle);
-
-            switch (response)
+            lock (purchaseLocker)
             {
-                case 0:
-                    //OK to purchase
-                    break;
-                case 1:
-                    //User Cancelled, should try again
-                    throw new InAppBillingPurchaseException(PurchaseError.UserCancelled);
-                case 2:
-                    //Network connection is down
-                    throw new InAppBillingPurchaseException(PurchaseError.ServiceUnavailable);
-                case 3:
-                    //Billing Unavailable
-                    throw new InAppBillingPurchaseException(PurchaseError.BillingUnavailable);
-                case 4:
-                    //Item Unavailable
-                    throw new InAppBillingPurchaseException(PurchaseError.ItemUnavailable);
-                case 5:
-                    //Developer Error
-                    throw new InAppBillingPurchaseException(PurchaseError.DeveloperError);
-                case 6:
-                    //Generic Error
+                if (tcsPurchase != null && !tcsPurchase.Task.IsCompleted)
+                    return null;
+
+                Bundle buyIntentBundle = serviceConnection.Service.GetBuyIntent(3, Context.PackageName, productSku, itemType, payload);
+                var response = GetResponseCodeFromBundle(buyIntentBundle);
+
+                switch (response)
+                {
+                    case 0:
+                        //OK to purchase
+                        break;
+                    case 1:
+                        //User Cancelled, should try again
+                        throw new InAppBillingPurchaseException(PurchaseError.UserCancelled);
+                    case 2:
+                        //Network connection is down
+                        throw new InAppBillingPurchaseException(PurchaseError.ServiceUnavailable);
+                    case 3:
+                        //Billing Unavailable
+                        throw new InAppBillingPurchaseException(PurchaseError.BillingUnavailable);
+                    case 4:
+                        //Item Unavailable
+                        throw new InAppBillingPurchaseException(PurchaseError.ItemUnavailable);
+                    case 5:
+                        //Developer Error
+                        throw new InAppBillingPurchaseException(PurchaseError.DeveloperError);
+                    case 6:
+                        //Generic Error
+                        throw new InAppBillingPurchaseException(PurchaseError.GeneralError);
+                    case 7:
+                        //already purchased
+                        throw new InAppBillingPurchaseException(PurchaseError.AlreadyOwned);
+                }
+
+
+                var pendingIntent = buyIntentBundle.GetParcelable(RESPONSE_BUY_INTENT) as PendingIntent;
+                if (pendingIntent == null)
                     throw new InAppBillingPurchaseException(PurchaseError.GeneralError);
-                case 7:
-                    var purchases = await GetPurchasesAsync(itemType, verifyPurchase);
 
-                    var purchase = purchases.FirstOrDefault(p => p.ProductId == productSku && payload.Equals(p.DeveloperPayload));
+                tcsPurchase = new TaskCompletionSource<PurchaseResponse>();
 
-                    return purchase;
-                    //already purchased
-            }
-
-            var pendingIntent = buyIntentBundle.GetParcelable(RESPONSE_BUY_INTENT) as PendingIntent;
-            if (pendingIntent != null)
                 Context.StartIntentSenderForResult(pendingIntent.IntentSender, PURCHASE_REQUEST_CODE, new Intent(), 0, 0, 0);
+            }
 
             var result = await tcsPurchase.Task;
 
@@ -403,7 +406,7 @@ namespace Plugin.InAppBilling
         {
             if (serviceConnection?.Service == null)
             {
-                throw new InAppBillingPurchaseException(PurchaseError.BillingUnavailable, "You are not connected to the Google Play App store.");
+                throw new InAppBillingPurchaseException(PurchaseError.ServiceUnavailable, "You are not connected to the Google Play App store.");
             }
 
             var response = serviceConnection.Service.ConsumePurchase(3, Context.PackageName, purchaseToken);
@@ -466,7 +469,7 @@ namespace Plugin.InAppBilling
         public async override Task<InAppBillingPurchase> ConsumePurchaseAsync(string productId, ItemType itemType, string payload, IInAppBillingVerifyPurchase verifyPurchase)
         {
             if (serviceConnection?.Service == null)
-                throw new InAppBillingPurchaseException(PurchaseError.BillingUnavailable, "You are not connected to the Google Play App store.");
+                throw new InAppBillingPurchaseException(PurchaseError.ServiceUnavailable, "You are not connected to the Google Play App store.");
 
 
             if (payload == null)
@@ -504,7 +507,18 @@ namespace Plugin.InAppBilling
         public static void HandleActivityResult(int requestCode, Result resultCode, Intent data)
         {
 
-            if (PURCHASE_REQUEST_CODE != requestCode || data == null)
+            if (PURCHASE_REQUEST_CODE != requestCode)
+            {
+                return;
+            }
+
+            if(resultCode == Result.Canceled && tcsPurchase != null && !tcsPurchase.Task.IsCompleted)
+            {
+                tcsPurchase.SetException(new InAppBillingPurchaseException(PurchaseError.UserCancelled));
+                return;
+            }
+
+            if(data == null)
             {
                 return;
             }
@@ -558,6 +572,7 @@ namespace Plugin.InAppBilling
 
         InAppBillingServiceConnection serviceConnection;
         static TaskCompletionSource<PurchaseResponse> tcsPurchase;
+        static readonly object purchaseLocker = new object();
 
         static bool ValidOwnedItems(Bundle purchased)
         {
@@ -704,9 +719,21 @@ namespace Plugin.InAppBilling
             [JsonProperty(PropertyName = "price_amount_micros")]
             public Int64 MicrosPrice { get; set; }
 
-            public override string ToString()
-            {
-                return string.Format("[Product: Title={0}, Price={1}, Type={2}, Description={3}, ProductId={4}]", Title, Price, Type, Description, ProductId);
+            [JsonProperty(PropertyName = "introductoryPrice")]
+            public string IntroductoryPrice { get; set; }
+
+            // 0 is default if this property is not set
+            [JsonProperty(PropertyName = "introductoryPriceAmountMicros")]
+            public Int64 IntroductoryPriceAmountMicros { get; set; }
+
+            [JsonProperty(PropertyName = "introductoryPricePeriod")]
+            public string IntroductoryPricePeriod { get; set; }
+
+            [JsonProperty(PropertyName = "introductoryPriceCycles")]
+            public int IntroductoryPriceCycles { get; set; }
+
+            public override string ToString() {
+                return string.Format("[Product: Title={0}, Price={1}, Type={2}, Description={3}, ProductId={4}, CurrencyCode={5}, MicrosPrice={6}, IntroductoryPrice={7}, IntroductoryPriceAmountMicros={8}, IntroductoryPricePeriod={9}, IntroductoryPriceCycles={10}]", Title, Price, Type, Description, ProductId, CurrencyCode, MicrosPrice, IntroductoryPrice, IntroductoryPriceAmountMicros, IntroductoryPricePeriod, IntroductoryPriceCycles);
             }
         }
 
