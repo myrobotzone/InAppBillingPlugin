@@ -1,11 +1,22 @@
 ﻿using System;
+using System.Collections.Generic;
 
 namespace Plugin.InAppBilling.Abstractions
 {
-    /// <summary>
-    /// Purchase from in app billing
-    /// </summary>
-    public class InAppBillingPurchase
+	[Preserve(AllMembers = true)]
+	public class InAppBillingPurchaseComparer : IEqualityComparer<InAppBillingPurchase>
+	{
+		public bool Equals(InAppBillingPurchase x, InAppBillingPurchase y) => x.Equals(y);
+
+
+		public int GetHashCode(InAppBillingPurchase x) => x.GetHashCode();
+	}
+
+	/// <summary>
+	/// Purchase from in app billing
+	/// </summary>
+	[Preserve(AllMembers = true)]
+	public class InAppBillingPurchase : IEquatable<InAppBillingPurchase>
     {
         /// <summary>
         /// 
@@ -53,6 +64,22 @@ namespace Plugin.InAppBilling.Abstractions
         /// Developer payload
         /// </summary>
         public string Payload { get; set; }
+
+		public static bool operator ==(InAppBillingPurchase left, InAppBillingPurchase right) =>
+			Equals(left, right);
+
+		public static bool operator !=(InAppBillingPurchase left, InAppBillingPurchase right) =>
+			!Equals(left, right);
+
+		public override bool Equals(object obj) =>
+			(obj is InAppBillingPurchase purchase) && Equals(purchase);
+
+		public bool Equals(InAppBillingPurchase other) =>
+			(Id, ProductId, AutoRenewing, PurchaseToken, State, Payload) ==
+			(other.Id, other.ProductId, other.AutoRenewing, other.PurchaseToken, other.State, other.Payload);
+
+		public override int GetHashCode() =>
+			(Id, ProductId, AutoRenewing, PurchaseToken, State, Payload).GetHashCode();
 
 		/// <summary>
 		/// Gets or sets the date at which this purchase will expire. This is usually only relevant for subscriptions.

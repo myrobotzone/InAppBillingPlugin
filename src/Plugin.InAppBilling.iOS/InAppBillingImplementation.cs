@@ -41,7 +41,7 @@ namespace Plugin.InAppBilling
 		/// Connect to billing service
 		/// </summary>
 		/// <returns>If Success</returns>
-		public override Task<bool> ConnectAsync() => Task.FromResult(true);
+		public override Task<bool> ConnectAsync(ItemType itemType = ItemType.InAppPurchase) => Task.FromResult(true);
 
 		/// <summary>
 		/// Disconnect from the billing service
@@ -59,16 +59,17 @@ namespace Plugin.InAppBilling
 		{
 			var products = await GetProductAsync(productIds);
 
-            return products.Select(p => new InAppBillingProduct {
-                LocalizedPrice = p.LocalizedPrice(),
-                MicrosPrice = (long)(p.Price.DoubleValue * 1000000d),
-                Name = p.LocalizedTitle,
-                ProductId = p.ProductIdentifier,
-                Description = p.LocalizedDescription,
-                CurrencyCode = p.PriceLocale?.CurrencyCode ?? string.Empty,
-                LocalizedIntroductoryPrice = IsiOS112 ? (p.IntroductoryPrice?.LocalizedPrice() ?? string.Empty) : string.Empty,
-                MicrosIntroductoryPrice = IsiOS112 ? (long)((p.IntroductoryPrice?.Price?.DoubleValue ?? 0) * 1000000d) : 0
-            });
+			return products.Select(p => new InAppBillingProduct
+			{
+				LocalizedPrice = p.LocalizedPrice(),
+				MicrosPrice = (long)(p.Price.DoubleValue * 1000000d),
+				Name = p.LocalizedTitle,
+				ProductId = p.ProductIdentifier,
+				Description = p.LocalizedDescription,
+				CurrencyCode = p.PriceLocale?.CurrencyCode ?? string.Empty,
+				LocalizedIntroductoryPrice = IsiOS112 ? (p.IntroductoryPrice?.LocalizedPrice() ?? string.Empty) : string.Empty,
+				MicrosIntroductoryPrice = IsiOS112 ? (long)((p.IntroductoryPrice?.Price?.DoubleValue ?? 0) * 1000000d) : 0
+			});
 		}
 
 		Task<IEnumerable<SKProduct>> GetProductAsync(string[] productId)
@@ -89,7 +90,7 @@ namespace Plugin.InAppBilling
 
 
 		/// <summary>
-		/// Get all current purhcase for a specifiy product type.
+		/// Get all current purchase for a specifiy product type.
 		/// </summary>
 		/// <param name="itemType">Type of product</param>
 		/// <param name="verifyPurchase">Interface to verify purchase</param>
@@ -101,9 +102,11 @@ namespace Plugin.InAppBilling
 			if (purchases == null)
 				return null;
 
+			var comparer = new InAppBillingPurchaseComparer();
 			var converted = purchases
 				.Where(p => p != null)
-				.Select(p2 => p2.ToIABPurchase());
+				.Select(p2 => p2.ToIABPurchase())
+				.Distinct(comparer);
 
 			//try to validate purchases
 			var valid = await ValidateReceipt(verifyPurchase, string.Empty, string.Empty);
@@ -197,7 +200,8 @@ namespace Plugin.InAppBilling
 				TransactionDateUtc = reference.AddSeconds(p.TransactionDate.SecondsSinceReferenceDate),
 				Id = p.TransactionIdentifier,
 				ProductId = p.Payment?.ProductIdentifier ?? string.Empty,
-				State = p.GetPurchaseState()
+				State = p.GetPurchaseState(),
+				PurchaseToken = p.TransactionReceipt?.GetBase64EncodedString(NSDataBase64EncodingOptions.None) ?? string.Empty
 			};
 
 			if (verifyPurchase == null)
@@ -215,8 +219,11 @@ namespace Plugin.InAppBilling
 
 			// Get the receipt data for (server-side) validation.
 			// See: https://developer.apple.com/library/content/releasenotes/General/ValidateAppStoreReceipt/Introduction.html#//apple_ref/doc/uid/TP40010573
-			var receiptUrl = NSData.FromUrl(NSBundle.MainBundle.AppStoreReceiptUrl);
-			var receipt = receiptUrl.GetBase64EncodedString(NSDataBase64EncodingOptions.None);
+			NSData receiptUrl = null;
+			if(NSBundle.MainBundle.AppStoreReceiptUrl != null)
+				receiptUrl = NSData.FromUrl(NSBundle.MainBundle.AppStoreReceiptUrl);
+
+			var receipt = receiptUrl?.GetBase64EncodedString(NSDataBase64EncodingOptions.None);
 
 			return verifyPurchase.VerifyPurchase(receipt, string.Empty, productId, transactionId);
 		}
@@ -304,6 +311,28 @@ namespace Plugin.InAppBilling
 		/// <exception cref="InAppBillingPurchaseException">If an error occures during processing</exception>
 		public override Task<InAppBillingPurchase> ConsumePurchaseAsync(string productId, ItemType itemType, string payload, IInAppBillingVerifyPurchase verifyPurchase = null) =>
 			null;
+
+		public override Task<bool> FinishTransaction(InAppBillingPurchase purchase) =>
+			FinishTransaction(purchase?.Id);
+
+		public override async Task<bool> FinishTransaction(string purchaseId)
+		{
+			if (string.IsNullOrWhiteSpace(purchaseId))
+				throw new ArgumentException("PurchaseId must be valid", nameof(purchaseId));
+
+			var purchases = await RestoreAsync();
+
+			if (purchases == null)
+				return false;
+
+			var transaction = purchases.Where(p => p.TransactionIdentifier == purchaseId).FirstOrDefault();
+			if (transaction == null)
+				return false;
+
+			SKPaymentQueue.DefaultQueue.FinishTransaction(transaction);
+
+			return true;
+		}
 
 		PaymentObserver paymentObserver;
 
@@ -478,7 +507,8 @@ namespace Plugin.InAppBilling
 				TransactionDateUtc = NSDateToDateTimeUtc(transaction.TransactionDate),
 				Id = p.TransactionIdentifier,
 				ProductId = p.Payment?.ProductIdentifier ?? string.Empty,
-				State = p.GetPurchaseState()
+				State = p.GetPurchaseState(),
+				PurchaseToken = p.TransactionReceipt?.GetBase64EncodedString(NSDataBase64EncodingOptions.None) ?? string.Empty
 			};
 		}
 
@@ -519,7 +549,7 @@ namespace Plugin.InAppBilling
 	[Preserve(AllMembers = true)]
 	static class SKProductExtension
 	{
-        
+
 
 		/// <remarks>
 		/// Use Apple's sample code for formatting a SKProduct price
@@ -533,6 +563,9 @@ namespace Plugin.InAppBilling
 		/// </remarks>
 		public static string LocalizedPrice(this SKProduct product)
 		{
+			if (product?.PriceLocale == null)
+				return string.Empty;
+
 			var formatter = new NSNumberFormatter()
 			{
 				FormatterBehavior = NSNumberFormatterBehavior.Version_10_4,
@@ -544,15 +577,20 @@ namespace Plugin.InAppBilling
 			return formattedString;
 		}
 
-        public static string LocalizedPrice(this SKProductDiscount product) {
-            var formatter = new NSNumberFormatter() {
-                FormatterBehavior = NSNumberFormatterBehavior.Version_10_4,
-                NumberStyle = NSNumberFormatterStyle.Currency,
-                Locale = product.PriceLocale
-            };
-            var formattedString = formatter.StringFromNumber(product.Price);
-            Console.WriteLine(" ** formatter.StringFromNumber(" + product.Price + ") = " + formattedString + " for locale " + product.PriceLocale.LocaleIdentifier);
-            return formattedString;
-        }
+		public static string LocalizedPrice(this SKProductDiscount product)
+		{
+			if (product?.PriceLocale == null)
+				return string.Empty;
+
+			var formatter = new NSNumberFormatter()
+			{
+				FormatterBehavior = NSNumberFormatterBehavior.Version_10_4,
+				NumberStyle = NSNumberFormatterStyle.Currency,
+				Locale = product.PriceLocale
+			};
+			var formattedString = formatter.StringFromNumber(product.Price);
+			Console.WriteLine(" ** formatter.StringFromNumber(" + product.Price + ") = " + formattedString + " for locale " + product.PriceLocale.LocaleIdentifier);
+			return formattedString;
+		}
 	}
 }

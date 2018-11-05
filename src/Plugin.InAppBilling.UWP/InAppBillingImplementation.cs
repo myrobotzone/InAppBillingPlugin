@@ -25,11 +25,11 @@ namespace Plugin.InAppBilling
 		public override bool InTestingMode { get; set; }
 
 
-		/// <summary>
-		/// Connect to billing service
-		/// </summary>
-		/// <returns>If Success</returns>
-		public override Task<bool> ConnectAsync() => Task.FromResult(true);
+        /// <summary>
+        /// Connect to billing service
+        /// </summary>
+        /// <returns>If Success</returns>
+        public override Task<bool> ConnectAsync(ItemType itemType = ItemType.InAppPurchase) => Task.FromResult(true);
 
 		/// <summary>
 		/// Disconnect from the billing service

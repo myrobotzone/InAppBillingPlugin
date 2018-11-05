@@ -1,4 +1,10 @@
 ## Changelog
+
+### [2.0.0]
+* New dependencies. Built against newer version of current activity plugin
+* Change to "ConnectAsync()" on ANDROID! Please pass in the ItemType that you are about to purchase! The default is normal in app purchase.
+
+
 ### [1.2.3]
 * Fix issues with returning all iOS purchases on restore
 * Android - Add additional null checks if service isn't created
